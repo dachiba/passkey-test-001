@@ -19,3 +19,9 @@
 [2025-10-19T11:48:05.149Z] [INFO] REG-OPTIONS 応答 {"userId":"alice"}
 [2025-10-19T11:48:05.155Z] [ERROR] AUTH-OPTIONS 例外 {"userId":"bob","message":"not found"}
 [2025-10-19T11:48:05.159Z] [INFO] AUTH-VERIFY 応答 {"userId":"carol","verified":true}
+[2025-10-20T11:55:21.318Z] [INFO] REG-OPTIONS 応答 {"userId":"alice"}
+[2025-10-20T11:55:21.323Z] [ERROR] AUTH-OPTIONS 例外 {"userId":"bob","message":"not found"}
+[2025-10-20T11:55:21.327Z] [INFO] AUTH-VERIFY 応答 {"userId":"carol","verified":true}
+[2025-10-20T12:05:02.991Z] [INFO] REG-OPTIONS 応答 {"userId":"alice"}
+[2025-10-20T12:05:02.996Z] [ERROR] AUTH-OPTIONS 例外 {"userId":"bob","message":"not found"}
+[2025-10-20T12:05:03.000Z] [INFO] AUTH-VERIFY 応答 {"userId":"carol","verified":true}

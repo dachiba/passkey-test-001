@@ -118,7 +118,11 @@ function createUserHandle(): string {
   return Buffer.from(uuidv4(), 'utf8').toString('base64url');
 }
 
-function normalizeUserHandle(handle: string): string {
+function normalizeUserHandle(handle: string | undefined): string {
+  if (!handle) {
+    return createUserHandle();
+  }
+
   try {
     Buffer.from(handle, 'base64url');
     return handle;
