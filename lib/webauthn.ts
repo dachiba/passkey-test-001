@@ -131,10 +131,11 @@ export async function verifyRegistrationResponseForUser(
   }
 
   const { registrationInfo } = verification;
+  const registrationCredential = registrationInfo.credential;
   const credential = {
-    credentialId: Buffer.from(registrationInfo.credentialID).toString('base64url'),
-    publicKey: Buffer.from(registrationInfo.credentialPublicKey).toString('base64url'),
-    counter: registrationInfo.counter,
+    credentialId: registrationCredential.id,
+    publicKey: Buffer.from(registrationCredential.publicKey).toString('base64url'),
+    counter: registrationCredential.counter,
   };
 
   const updatedUser = await addOrUpdateCredential(sanitizedId, credential);

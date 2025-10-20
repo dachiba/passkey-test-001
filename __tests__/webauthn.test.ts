@@ -70,9 +70,11 @@ describe('WebAuthn ロジック', () => {
     verifyRegistrationResponse.mockResolvedValue({
       verified: true,
       registrationInfo: {
-        credentialPublicKey: Buffer.from('public'),
-        credentialID: credentialBytes,
-        counter: 1,
+        credential: {
+          id: credentialBytes.toString('base64url'),
+          publicKey: Buffer.from('public'),
+          counter: 1,
+        },
       },
     });
 
@@ -92,9 +94,11 @@ describe('WebAuthn ロジック', () => {
     verifyRegistrationResponse.mockResolvedValue({
       verified: true,
       registrationInfo: {
-        credentialPublicKey: Buffer.from('public'),
-        credentialID: credentialBytes,
-        counter: 1,
+        credential: {
+          id: credentialBytes.toString('base64url'),
+          publicKey: Buffer.from('public'),
+          counter: 1,
+        },
       },
     });
     generateAuthenticationOptions.mockResolvedValue({
@@ -131,9 +135,11 @@ describe('WebAuthn ロジック', () => {
     verifyRegistrationResponse.mockResolvedValue({
       verified: true,
       registrationInfo: {
-        credentialPublicKey: Buffer.from('public'),
-        credentialID: credentialBytes,
-        counter: 1,
+        credential: {
+          id: credentialBytes.toString('base64url'),
+          publicKey: Buffer.from('public'),
+          counter: 1,
+        },
       },
     });
 
