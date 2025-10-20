@@ -1,0 +1,15 @@
+# node_modulesは除外
+node_modules/
+
+# .envファイルも除外
+.env
+
+# Macのゴミファイル
+.DS_Store
+
+# ビルド関連
+dist
+build
+
+# log
+log

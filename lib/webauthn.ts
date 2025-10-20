@@ -1,0 +1,195 @@
+import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse,
+} from '@simplewebauthn/server';
+import type {
+  AuthenticationResponseJSON,
+  RegistrationResponseJSON,
+} from '@simplewebauthn/types';
+import { Buffer } from 'node:buffer';
+import { logError, logInfo } from './logger';
+import { addOrUpdateCredential, ensureUser, getUser, type StoredUser } from './store';
+
+export const RP_ID = process.env.RP_ID ?? 'localhost';
+export const RP_NAME = process.env.RP_NAME ?? 'Passkey デモ';
+export const ORIGIN = process.env.RP_ORIGIN ?? `http://${RP_ID}:3000`;
+
+const USER_ID_PATTERN = /^[a-zA-Z0-9._-]{3,64}$/;
+
+const registrationChallenges = new Map<string, string>();
+const authenticationChallenges = new Map<string, string>();
+
+export function sanitizeUserId(input: string): string {
+  const trimmed = input.trim();
+  if (!USER_ID_PATTERN.test(trimmed)) {
+    throw new Error('ユーザーIDは3〜64文字の英数字・ドット・ハイフン・アンダースコアのみ使用できます。');
+  }
+  return trimmed;
+}
+
+export async function generateRegistrationOptionsForUser(userId: string) {
+  const sanitizedId = sanitizeUserId(userId);
+  const user = await ensureUser(sanitizedId);
+  const options = await generateRegistrationOptions({
+    rpName: RP_NAME,
+    rpID: RP_ID,
+    userName: sanitizedId,
+    userDisplayName: sanitizedId,
+    userID: user.userHandle,
+    timeout: 60_000,
+    attestationType: 'none',
+    excludeCredentials: user.credentials.map((credential) => ({
+      id: Buffer.from(credential.credentialId, 'base64url'),
+      type: 'public-key' as const,
+    })),
+    authenticatorSelection: {
+      residentKey: 'preferred',
+      userVerification: 'preferred',
+    },
+  });
+
+  registrationChallenges.set(sanitizedId, options.challenge);
+  await logInfo('REG-OPTIONS 生成', {
+    userId: sanitizedId,
+    excludeCredentialCount: options.excludeCredentials?.length ?? 0,
+  });
+  return options;
+}
+
+export async function verifyRegistrationResponseForUser(
+  userId: string,
+  response: RegistrationResponseJSON,
+) {
+  const sanitizedId = sanitizeUserId(userId);
+  const expectedChallenge = registrationChallenges.get(sanitizedId);
+
+  if (!expectedChallenge) {
+    throw new Error('登録用チャレンジが見つかりません。最初からやり直してください。');
+  }
+
+  const verification = await verifyRegistrationResponse({
+    response,
+    expectedChallenge,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RP_ID,
+    requireUserVerification: true,
+  });
+
+  registrationChallenges.delete(sanitizedId);
+
+  if (!verification.verified || !verification.registrationInfo) {
+    await logError('REG-VERIFY 失敗', { userId: sanitizedId });
+    return { verified: false as const };
+  }
+
+  const { registrationInfo } = verification;
+  const credential = {
+    credentialId: Buffer.from(registrationInfo.credentialID).toString('base64url'),
+    publicKey: Buffer.from(registrationInfo.credentialPublicKey).toString('base64url'),
+    counter: registrationInfo.counter,
+  };
+
+  const updatedUser = await addOrUpdateCredential(sanitizedId, credential);
+  await logInfo('REG-VERIFY 成功', {
+    userId: sanitizedId,
+    credentialId: credential.credentialId,
+  });
+
+  return {
+    verified: true as const,
+    user: updatedUser,
+  };
+}
+
+export async function generateAuthenticationOptionsForUser(userId: string) {
+  const sanitizedId = sanitizeUserId(userId);
+  const user = await getUser(sanitizedId);
+  if (!user || user.credentials.length === 0) {
+    await logError('AUTH-OPTIONS ユーザー未登録', { userId: sanitizedId });
+    throw new Error('パスキーが登録されていません。先に登録を行ってください。');
+  }
+
+  const options = await generateAuthenticationOptions({
+    rpID: RP_ID,
+    timeout: 60_000,
+    userVerification: 'preferred',
+    allowCredentials: user.credentials.map((credential) => ({
+      id: Buffer.from(credential.credentialId, 'base64url'),
+      type: 'public-key' as const,
+    })),
+  });
+
+  authenticationChallenges.set(sanitizedId, options.challenge);
+  await logInfo('AUTH-OPTIONS 生成', {
+    userId: sanitizedId,
+    allowCredentialCount: options.allowCredentials?.length ?? 0,
+  });
+  return options;
+}
+
+export async function verifyAuthenticationResponseForUser(
+  userId: string,
+  response: AuthenticationResponseJSON,
+) {
+  const sanitizedId = sanitizeUserId(userId);
+  const expectedChallenge = authenticationChallenges.get(sanitizedId);
+
+  if (!expectedChallenge) {
+    await logError('AUTH-VERIFY チャレンジ未取得', { userId: sanitizedId });
+    throw new Error('認証用チャレンジが見つかりません。最初からやり直してください。');
+  }
+
+  const user = await getUser(sanitizedId);
+  if (!user) {
+    await logError('AUTH-VERIFY ユーザー不在', { userId: sanitizedId });
+    throw new Error('ユーザー情報が見つかりません。');
+  }
+
+  const credential = findCredential(user, response.id);
+  if (!credential) {
+    await logError('AUTH-VERIFY 資格情報不一致', {
+      userId: sanitizedId,
+      credentialId: response.id,
+    });
+    throw new Error('該当するパスキーが登録されていません。');
+  }
+
+  const verification = await verifyAuthenticationResponse({
+    response,
+    expectedChallenge,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RP_ID,
+    requireUserVerification: true,
+    authenticator: {
+      credentialID: Buffer.from(credential.credentialId, 'base64url'),
+      credentialPublicKey: Buffer.from(credential.publicKey, 'base64url'),
+      counter: credential.counter,
+    },
+  });
+
+  authenticationChallenges.delete(sanitizedId);
+
+  if (!verification.verified || !verification.authenticationInfo) {
+    await logError('AUTH-VERIFY 失敗', { userId: sanitizedId });
+    return { verified: false as const };
+  }
+
+  await addOrUpdateCredential(sanitizedId, {
+    ...credential,
+    counter: verification.authenticationInfo.newCounter,
+  });
+
+  await logInfo('AUTH-VERIFY 成功', {
+    userId: sanitizedId,
+    credentialId: credential.credentialId,
+    counter: verification.authenticationInfo.newCounter,
+  });
+
+  return { verified: true as const };
+}
+
+function findCredential(user: StoredUser, credentialId: string) {
+  return user.credentials.find((item) => item.credentialId === credentialId);
+}
