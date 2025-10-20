@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -42,7 +43,8 @@ describe('STORE-001: saveCredential 正常保存', () => {
     const user = await store.ensureUser('bob');
 
     expect(user.id).toBe('bob');
-    expect(user.userHandle).toHaveLength(36);
+    expect(user.userHandle).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(Buffer.from(user.userHandle, 'base64url')).toHaveLength(36);
 
     const persisted = JSON.parse(
       readFileSync(path.join(tempDir, 'data', 'webauthn.json'), 'utf-8'),

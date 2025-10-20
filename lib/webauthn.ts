@@ -37,7 +37,7 @@ export async function generateRegistrationOptionsForUser(userId: string) {
     rpID: RP_ID,
     userName: sanitizedId,
     userDisplayName: sanitizedId,
-    userID: user.userHandle,
+    userID: Buffer.from(user.userHandle, 'base64url'),
     timeout: 60_000,
     attestationType: 'none',
     excludeCredentials: user.credentials.map((credential) => ({

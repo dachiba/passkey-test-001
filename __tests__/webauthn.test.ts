@@ -55,6 +55,7 @@ describe('WebAuthn ロジック', () => {
     expect(options.challenge).toBe('registration-challenge');
     expect(generateRegistrationOptions).toHaveBeenCalledWith(
       expect.objectContaining({
+        userID: expect.any(Buffer),
         rpID: 'localhost',
         userName: 'alice',
       }),

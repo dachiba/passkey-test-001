@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -48,20 +49,42 @@ export async function writeStore(store: WebAuthnStore): Promise<void> {
 
 export async function getUser(userId: string): Promise<StoredUser | undefined> {
   const store = await readStore();
-  return store[userId];
+  const user = store[userId];
+  if (!user) {
+    return undefined;
+  }
+
+  const normalizedHandle = normalizeUserHandle(user.userHandle);
+  if (normalizedHandle !== user.userHandle) {
+    user.userHandle = normalizedHandle;
+    store[userId] = user;
+    await writeStore(store);
+  }
+
+  return user;
 }
 
 export async function ensureUser(userId: string): Promise<StoredUser> {
   const store = await readStore();
-  if (!store[userId]) {
-    store[userId] = {
-      id: userId,
-      userHandle: uuidv4(),
-      credentials: [],
-    };
-    await writeStore(store);
+  const existing = store[userId];
+  if (existing) {
+    const normalizedHandle = normalizeUserHandle(existing.userHandle);
+    if (normalizedHandle !== existing.userHandle) {
+      existing.userHandle = normalizedHandle;
+      store[userId] = existing;
+      await writeStore(store);
+    }
+    return existing;
   }
-  return store[userId];
+
+  const newUser: StoredUser = {
+    id: userId,
+    userHandle: createUserHandle(),
+    credentials: [],
+  };
+  store[userId] = newUser;
+  await writeStore(store);
+  return newUser;
 }
 
 export async function addOrUpdateCredential(
@@ -72,9 +95,10 @@ export async function addOrUpdateCredential(
   const baseUser: StoredUser =
     store[userId] ?? {
       id: userId,
-      userHandle: uuidv4(),
+      userHandle: createUserHandle(),
       credentials: [],
     };
+  baseUser.userHandle = normalizeUserHandle(baseUser.userHandle);
   const updatedCredentials = baseUser.credentials.filter(
     (item) => item.credentialId !== credential.credentialId,
   );
@@ -88,4 +112,17 @@ export async function addOrUpdateCredential(
   store[userId] = updatedUser;
   await writeStore(store);
   return updatedUser;
+}
+
+function createUserHandle(): string {
+  return Buffer.from(uuidv4(), 'utf8').toString('base64url');
+}
+
+function normalizeUserHandle(handle: string): string {
+  try {
+    Buffer.from(handle, 'base64url');
+    return handle;
+  } catch (error) {
+    return Buffer.from(handle, 'utf8').toString('base64url');
+  }
 }
