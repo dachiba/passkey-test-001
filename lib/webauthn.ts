@@ -68,7 +68,7 @@ export async function generateRegistrationOptionsForUser(
     timeout: 60_000,
     attestationType: 'none',
     excludeCredentials: user.credentials.map((credential) => ({
-      id: Buffer.from(credential.credentialId, 'base64url'),
+      id: credential.credentialId,
       type: 'public-key' as const,
     })),
     authenticatorSelection: {
@@ -167,7 +167,7 @@ export async function generateAuthenticationOptionsForUser(
     timeout: 60_000,
     userVerification: 'preferred',
     allowCredentials: user.credentials.map((credential) => ({
-      id: Buffer.from(credential.credentialId, 'base64url'),
+      id: credential.credentialId,
       type: 'public-key' as const,
     })),
   });
