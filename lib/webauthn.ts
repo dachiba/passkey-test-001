@@ -24,8 +24,19 @@ export const ORIGIN = process.env.RP_ORIGIN ?? `http://${RP_ID}:3000`;
 
 const USER_ID_PATTERN = /^[a-zA-Z0-9._-]{3,64}$/;
 
-const registrationChallenges = new Map<string, string>();
-const authenticationChallenges = new Map<string, string>();
+type ChallengeStore = Map<string, string>;
+
+interface GlobalChallengeStore {
+  __registrationChallenges?: ChallengeStore;
+  __authenticationChallenges?: ChallengeStore;
+}
+
+const globalStore = globalThis as typeof globalThis & GlobalChallengeStore;
+
+const registrationChallenges: ChallengeStore =
+  globalStore.__registrationChallenges ?? (globalStore.__registrationChallenges = new Map());
+const authenticationChallenges: ChallengeStore =
+  globalStore.__authenticationChallenges ?? (globalStore.__authenticationChallenges = new Map());
 
 function challengeKey(userId: string, rpID: string) {
   return `${userId}::${rpID}`;
@@ -71,6 +82,7 @@ export async function generateRegistrationOptionsForUser(
     userId: sanitizedId,
     excludeCredentialCount: options.excludeCredentials?.length ?? 0,
     rpID,
+    challenge: options.challenge,
   });
   return options;
 }
@@ -86,6 +98,11 @@ export async function verifyRegistrationResponseForUser(
   const expectedChallenge = registrationChallenges.get(challengeKey(sanitizedId, rpID));
 
   if (!expectedChallenge) {
+    await logError('REG-VERIFY チャレンジ不明', {
+      userId: sanitizedId,
+      rpID,
+      knownKeys: Array.from(registrationChallenges.keys()),
+    });
     throw new Error('登録用チャレンジが見つかりません。最初からやり直してください。');
   }
 
