@@ -11,6 +11,8 @@ pnpm-debug.log*
 .next/cache
 out
 *.log
+logs/
+.logs/
 .env.local
 .env.development.local
 .env.test.local
