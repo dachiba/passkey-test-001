@@ -12,6 +12,12 @@ import { Buffer } from 'node:buffer';
 import { logError, logInfo } from './logger';
 import { addOrUpdateCredential, ensureUser, getUser, type StoredUser } from './store';
 
+export type PasskeyContext = {
+  rpID?: string;
+  rpName?: string;
+  origin?: string;
+};
+
 export const RP_ID = process.env.RP_ID ?? 'localhost';
 export const RP_NAME = process.env.RP_NAME ?? 'Passkey デモ';
 export const ORIGIN = process.env.RP_ORIGIN ?? `http://${RP_ID}:3000`;
@@ -21,6 +27,10 @@ const USER_ID_PATTERN = /^[a-zA-Z0-9._-]{3,64}$/;
 const registrationChallenges = new Map<string, string>();
 const authenticationChallenges = new Map<string, string>();
 
+function challengeKey(userId: string, rpID: string) {
+  return `${userId}::${rpID}`;
+}
+
 export function sanitizeUserId(input: string): string {
   const trimmed = input.trim();
   if (!USER_ID_PATTERN.test(trimmed)) {
@@ -29,12 +39,18 @@ export function sanitizeUserId(input: string): string {
   return trimmed;
 }
 
-export async function generateRegistrationOptionsForUser(userId: string) {
+export async function generateRegistrationOptionsForUser(
+  userId: string,
+  context: PasskeyContext = {},
+) {
   const sanitizedId = sanitizeUserId(userId);
   const user = await ensureUser(sanitizedId);
+  const rpID = context.rpID ?? RP_ID;
+  const rpName = context.rpName ?? RP_NAME;
+
   const options = await generateRegistrationOptions({
-    rpName: RP_NAME,
-    rpID: RP_ID,
+    rpName,
+    rpID,
     userName: sanitizedId,
     userDisplayName: sanitizedId,
     userID: Buffer.from(user.userHandle, 'base64url'),
@@ -50,10 +66,11 @@ export async function generateRegistrationOptionsForUser(userId: string) {
     },
   });
 
-  registrationChallenges.set(sanitizedId, options.challenge);
+  registrationChallenges.set(challengeKey(sanitizedId, rpID), options.challenge);
   await logInfo('REG-OPTIONS 生成', {
     userId: sanitizedId,
     excludeCredentialCount: options.excludeCredentials?.length ?? 0,
+    rpID,
   });
   return options;
 }
@@ -61,9 +78,12 @@ export async function generateRegistrationOptionsForUser(userId: string) {
 export async function verifyRegistrationResponseForUser(
   userId: string,
   response: RegistrationResponseJSON,
+  context: PasskeyContext = {},
 ) {
   const sanitizedId = sanitizeUserId(userId);
-  const expectedChallenge = registrationChallenges.get(sanitizedId);
+  const rpID = context.rpID ?? RP_ID;
+  const origin = context.origin ?? ORIGIN;
+  const expectedChallenge = registrationChallenges.get(challengeKey(sanitizedId, rpID));
 
   if (!expectedChallenge) {
     throw new Error('登録用チャレンジが見つかりません。最初からやり直してください。');
@@ -72,15 +92,24 @@ export async function verifyRegistrationResponseForUser(
   const verification = await verifyRegistrationResponse({
     response,
     expectedChallenge,
-    expectedOrigin: ORIGIN,
-    expectedRPID: RP_ID,
+    expectedOrigin: origin,
+    expectedRPID: rpID,
     requireUserVerification: true,
   });
 
-  registrationChallenges.delete(sanitizedId);
+  if (!verification) {
+    await logError('REG-VERIFY 検証結果なし', { userId: sanitizedId });
+    throw new Error('登録検証に失敗しました。');
+  }
+
+  registrationChallenges.delete(challengeKey(sanitizedId, rpID));
 
   if (!verification.verified || !verification.registrationInfo) {
-    await logError('REG-VERIFY 失敗', { userId: sanitizedId });
+    await logError('REG-VERIFY 失敗', {
+      userId: sanitizedId,
+      verified: verification.verified,
+      hasRegistrationInfo: Boolean(verification.registrationInfo),
+    });
     return { verified: false as const };
   }
 
@@ -95,6 +124,7 @@ export async function verifyRegistrationResponseForUser(
   await logInfo('REG-VERIFY 成功', {
     userId: sanitizedId,
     credentialId: credential.credentialId,
+    rpID,
   });
 
   return {
@@ -103,7 +133,10 @@ export async function verifyRegistrationResponseForUser(
   };
 }
 
-export async function generateAuthenticationOptionsForUser(userId: string) {
+export async function generateAuthenticationOptionsForUser(
+  userId: string,
+  context: PasskeyContext = {},
+) {
   const sanitizedId = sanitizeUserId(userId);
   const user = await getUser(sanitizedId);
   if (!user || user.credentials.length === 0) {
@@ -111,8 +144,9 @@ export async function generateAuthenticationOptionsForUser(userId: string) {
     throw new Error('パスキーが登録されていません。先に登録を行ってください。');
   }
 
+  const rpID = context.rpID ?? RP_ID;
   const options = await generateAuthenticationOptions({
-    rpID: RP_ID,
+    rpID,
     timeout: 60_000,
     userVerification: 'preferred',
     allowCredentials: user.credentials.map((credential) => ({
@@ -121,10 +155,11 @@ export async function generateAuthenticationOptionsForUser(userId: string) {
     })),
   });
 
-  authenticationChallenges.set(sanitizedId, options.challenge);
+  authenticationChallenges.set(challengeKey(sanitizedId, rpID), options.challenge);
   await logInfo('AUTH-OPTIONS 生成', {
     userId: sanitizedId,
     allowCredentialCount: options.allowCredentials?.length ?? 0,
+    rpID,
   });
   return options;
 }
@@ -132,9 +167,12 @@ export async function generateAuthenticationOptionsForUser(userId: string) {
 export async function verifyAuthenticationResponseForUser(
   userId: string,
   response: AuthenticationResponseJSON,
+  context: PasskeyContext = {},
 ) {
   const sanitizedId = sanitizeUserId(userId);
-  const expectedChallenge = authenticationChallenges.get(sanitizedId);
+  const rpID = context.rpID ?? RP_ID;
+  const origin = context.origin ?? ORIGIN;
+  const expectedChallenge = authenticationChallenges.get(challengeKey(sanitizedId, rpID));
 
   if (!expectedChallenge) {
     await logError('AUTH-VERIFY チャレンジ未取得', { userId: sanitizedId });
@@ -159,8 +197,8 @@ export async function verifyAuthenticationResponseForUser(
   const verification = await verifyAuthenticationResponse({
     response,
     expectedChallenge,
-    expectedOrigin: ORIGIN,
-    expectedRPID: RP_ID,
+    expectedOrigin: origin,
+    expectedRPID: rpID,
     requireUserVerification: true,
     authenticator: {
       credentialID: Buffer.from(credential.credentialId, 'base64url'),
@@ -169,7 +207,7 @@ export async function verifyAuthenticationResponseForUser(
     },
   });
 
-  authenticationChallenges.delete(sanitizedId);
+  authenticationChallenges.delete(challengeKey(sanitizedId, rpID));
 
   if (!verification.verified || !verification.authenticationInfo) {
     await logError('AUTH-VERIFY 失敗', { userId: sanitizedId });
@@ -185,6 +223,7 @@ export async function verifyAuthenticationResponseForUser(
     userId: sanitizedId,
     credentialId: credential.credentialId,
     counter: verification.authenticationInfo.newCounter,
+    rpID,
   });
 
   return { verified: true as const };
